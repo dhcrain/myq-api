@@ -35,7 +35,6 @@ account.login()
 
     return account.setDoorOpen(device.serialNumber, false)
   })
-  .then(response => console.log(response))
   .then(function (result) {
     console.log('getDevices result:', result);
     if (result.returnCode !== 0) {

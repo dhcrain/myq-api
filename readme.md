@@ -60,6 +60,7 @@ Example code:
 ```js
 // Optionally, pass in device types to filter them.
 // If none are specified, all devices will be returned.
+// [WIP]: Fix this.
 account.getDevices([
   constants.allDeviceTypes.hub,
   constants.allDeviceTypes.virtualGarageDoorOpener

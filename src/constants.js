@@ -4,7 +4,6 @@ const deviceVersion = 'v5.1';
 const constants = {
   authBase: `https://api.myqdevice.com/api/${authVersion}`,
   deviceBase: `https://api.myqdevice.com/api/${deviceVersion}`,
-  appId: 'JVM/G9Nwih5BwKgNCjLxiFUQxQijAebyyg8QUHr7JOrP+tuPb8iHfRHKwTmDzHOu',
   allDeviceTypes: {
     hub: 'hub',
     virtualGarageDoorOpener: 'virtualgaragedooropener',
@@ -35,13 +34,20 @@ const constants = {
     5: 'going down',
     9: 'not closed',
   },
+  headers: {
+    defaultUserAgent: 'okhttp/3.10.0',
+    deviceApiVersion: deviceVersion,
+    defaultBrandId: 2,
+    defaultCulture: 'en',
+    appId: 'JVM/G9Nwih5BwKgNCjLxiFUQxQijAebyyg8QUHr7JOrP+tuPb8iHfRHKwTmDzHOu',
+  },
   lightCommands: {
     on: 'on',
     off: 'off',
   },
   lightStates: {
-    0: 'off',
-    1: 'on',
+    0: 'turnoff',
+    1: 'turnon',
   },
   myQProperties: {
     doorState: 'door_state',
@@ -50,10 +56,10 @@ const constants = {
     online: 'online',
   },
   routes: {
-    account: 'My',
-    getDevices: 'Accounts/{accountId}/Devices',
-    login: 'Login',
-    setDevice: 'Accounts/{accountId}/Devices/{serialNumber}/actions',
+    account: '/My',
+    getDevices: '/Accounts/{accountId}/Devices',
+    login: '/Login',
+    setDevice: '/Accounts/{accountId}/Devices/{serialNumber}/actions',
   },
 };
 

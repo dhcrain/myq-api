@@ -3,52 +3,57 @@ const axios = require('axios');
 
 const constants = require('./constants');
 
-class ErrorHandler {}
-ErrorHandler.prototype.returnError = (returnCode, error, response) => {
-  const result = {
-    returnCode,
-    message: constants.errorMessages[returnCode],
-    providerMessage: null,
-    unhandledError: null,
-  };
-  if (response && response.description) {
-    result.providerMessage = response.description;
-  }
-  if (error) {
-    result.unhandledError = error;
-  }
-  return Promise.resolve(result);
-};
-ErrorHandler.prototype.parseBadResponse = response => {
-  if (!response) {
-    return ErrorHandler.prototype.returnerror(12, null, response);
+class ErrorHandler {
+  static parseBadResponse(response) {
+    if (!response) {
+      return ErrorHandler.returnError(12, null, response);
+    }
+
+    const { data, status } = response;
+    if (!status) {
+      return ErrorHandler.returnError(12, null, data);
+    }
+    if (status === 500) {
+      return ErrorHandler.returnError(15);
+    }
+    if ([400, 401].includes(status)) {
+      if (data.code === '401.205') {
+        return ErrorHandler.returnError(16, null, data);
+      }
+      if (data.code === '401.207') {
+        return ErrorHandler.returnError(17, null, data);
+      }
+      return ErrorHandler.returnError(14, null, data);
+    }
+    if (status === 404) {
+      // Return an error for a bad serial number.
+      if (data.code === '404.401') {
+        return ErrorHandler.returnError(18, null, data);
+      }
+
+      // Handle generic 404 errors, likely indicating something wrong with this implementation.
+      return ErrorHandler.returnError(20);
+    }
+
+    return ErrorHandler.returnError(11, null, data);
   }
 
-  const { data, status } = response;
-  if (!status) {
-    return ErrorHandler.prototype.returnerror(12, null, data);
-  }
-  if (status === 500) {
-    return ErrorHandler.prototype.returnerror(15);
-  }
-  if ([400, 401].includes(status)) {
-    if (data.code === '401.205') {
-      return ErrorHandler.prototype.returnerror(16, null, data);
+  static returnError(returnCode, error, response) {
+    const result = {
+      returnCode,
+      message: constants.errorMessages[returnCode],
+      providerMessage: null,
+      unhandledError: null,
+    };
+    if (response && response.description) {
+      result.providerMessage = response.description;
     }
-    if (data.code === '401.207') {
-      return ErrorHandler.prototype.returnerror(17, null, data);
+    if (error) {
+      result.unhandledError = error;
     }
-    return ErrorHandler.prototype.returnerror(14, null, data);
+    return Promise.resolve(result);
   }
-  if (status === 404) {
-    if (data.code === '404.401') {
-      return ErrorHandler.prototype.returnerror(18, null, data);
-    }
-    return ErrorHandler.prototype.returnerror(20);
-  }
-
-  return ErrorHandler.prototype.returnerror(11, null, data);
-};
+}
 
 class MyQ {
   // Build the object and initialize any properties we're going to use.
@@ -61,46 +66,35 @@ class MyQ {
 
   login() {
     if (!this.username || !this.password) {
-      return ErrorHandler.prototype.returnError(14);
+      return ErrorHandler.returnError(14);
     }
 
-    return Promise.resolve(
-      this.executeRequest(constants.routes.login, 'post', null, {
-        Username: this.username,
-        Password: this.password,
+    return this.executeRequest(constants.routes.login, 'post', null, {
+      Username: this.username,
+      Password: this.password,
+    })
+      .then(originalResponse => {
+        const { response, returnCode } = originalResponse;
+        if (returnCode !== 0) {
+          throw originalResponse;
+        }
+        if (!response || !response.data) {
+          return ErrorHandler.returnError(12);
+        }
+
+        const { data } = response;
+        if (!data.SecurityToken) {
+          return ErrorHandler.returnError(11);
+        }
+
+        const token = data.SecurityToken;
+
+        return {
+          returnCode: 0,
+          token,
+        };
       })
-        .then(originalResponse => {
-          const { response, returnCode } = originalResponse;
-          if (returnCode !== 0) {
-            throw originalResponse;
-          }
-          if (!response || !response.data) {
-            return ErrorHandler.prototype.returnError(12);
-          }
-
-          const { data } = response;
-          let token;
-          if (data) {
-            token = data.SecurityToken;
-          }
-
-          switch (response.status) {
-            case 200:
-              if (!token) {
-                return ErrorHandler.prototype.returnError(11);
-              }
-
-              this.securityToken = token;
-              return {
-                returnCode: 0,
-                token: data.SecurityToken,
-              };
-            default:
-              throw originalResponse;
-          }
-        })
-        .catch(({ response }) => ErrorHandler.prototype.parseBadResponse(response))
-    );
+      .catch(({ response }) => ErrorHandler.parseBadResponse(response));
   }
 
   checkIsLoggedIn() {
@@ -111,12 +105,16 @@ class MyQ {
     const isLoginRequest = route === constants.routes.login;
     const headers = {
       'Content-Type': 'application/json',
-      MyQApplicationId: constants.appId,
+      MyQApplicationId: constants.headers.appId,
+      'User-Agent': constants.headers.defaultUserAgent,
+      ApiVersion: constants.headers.deviceApiVersion,
+      BrandId: constants.headers.defaultBrandId,
+      Culture: constants.headers.defaultCulture,
     };
 
     // If we aren't logged in or logging in, throw an error.
     if (!isLoginRequest && !this.checkIsLoggedIn()) {
-      return ErrorHandler.prototype.returnError(13);
+      return ErrorHandler.returnError(13);
     } else if (!isLoginRequest) {
       // Add our security token to the headers.
       headers.SecurityToken = this.securityToken;
@@ -131,8 +129,11 @@ class MyQ {
 
     const config = {
       method,
-      url: `${baseUrl}/${route}`,
+      baseURL: baseUrl,
+      url: route,
       headers,
+      data,
+      params,
     };
     if (data) {
       config.data = data;
@@ -141,7 +142,7 @@ class MyQ {
       config.params = params;
     }
 
-    return Promise.resolve(axios(config)).then(response => ({
+    return axios(config).then(response => ({
       returnCode: 0,
       response,
     }));
@@ -150,42 +151,30 @@ class MyQ {
   getAccountInfo() {
     return this.executeRequest(constants.routes.account, 'get', { expand: 'account' })
       .then(returnValue => {
-        if (returnValue.returnCode !== 0 && typeof returnValue.returnCode !== 'undefined') {
+        if (returnValue.returnCode !== 0) {
           return returnValue;
         }
         const { data } = returnValue.response;
         if (!data || !data.Account || !data.Account.Id) {
-          return ErrorHandler.prototype.returnError(11);
+          return ErrorHandler.returnError(11);
         }
         this.accountId = data.Account.Id;
 
-        return this;
+        return null;
       })
-      .catch(({ response }) => ErrorHandler.prototype.parseBadResponse(response));
+      .catch(({ response }) => ErrorHandler.parseBadResponse(response));
   }
 
-  getDevices(deviceTypeParams) {
-    let promise = Promise.resolve(() => null);
+  getDevices() {
+    let promise = Promise.resolve();
     if (!this.accountId) {
-      promise = Promise.resolve(this.getAccountInfo());
+      promise = this.getAccountInfo();
     }
-
-    let deviceTypes = [];
-    if (deviceTypeParams) {
-      deviceTypes = Array.isArray(deviceTypeParams) ? deviceTypeParams : [deviceTypeParams];
-    }
-
-    // TODO: Validate device types when we have a more complete list.
-    Object.values(deviceTypes).forEach(deviceType => {
-      if (!Object.values(constants.allDeviceTypes).includes(deviceType)) {
-        // return ErrorHandler.prototype.returnError(15);
-      }
-    });
 
     return promise
       .then(() =>
         this.executeRequest(
-          `${constants.routes.getDevices.replace('{accountId}', this.accountId)}`,
+          constants.routes.getDevices.replace('{accountId}', this.accountId),
           'get'
         )
       )
@@ -195,20 +184,12 @@ class MyQ {
         }
 
         const {
-          response: { data, status },
+          response: { data },
         } = returnValue;
-        if (![200, 204].includes(status)) {
-          return ErrorHandler.prototype.parseBadResponse(returnValue.response);
-        }
 
-        let devices = data.items;
+        const devices = data.items;
         if (!devices) {
-          return ErrorHandler.prototype.returnError(11);
-        }
-
-        // Filter device types if requested.
-        if (deviceTypes.length) {
-          devices = devices.filter(device => deviceTypes.includes(device.device_type));
+          return ErrorHandler.returnError(11);
         }
 
         const result = {
@@ -245,7 +226,7 @@ class MyQ {
         result.devices = modifiedDevices;
         return result;
       })
-      .catch(({ response }) => ErrorHandler.prototype.parseBadResponse(response));
+      .catch(({ response }) => ErrorHandler.parseBadResponse(response));
   }
 
   getDeviceState(serialNumber, attributeName) {
@@ -253,9 +234,9 @@ class MyQ {
       .then(response => {
         const device = (response.devices || []).find(d => d.serialNumber === serialNumber);
         if (!device) {
-          return ErrorHandler.prototype.returnError(18);
+          return ErrorHandler.returnError(18);
         } else if (!(attributeName in device)) {
-          return ErrorHandler.prototype.returnError(19);
+          return ErrorHandler.returnError(19);
         }
 
         const result = {
@@ -264,7 +245,7 @@ class MyQ {
         };
         return result;
       })
-      .catch(({ response }) => ErrorHandler.prototype.parseBadResponse(response));
+      .catch(({ response }) => ErrorHandler.parseBadResponse(response));
   }
 
   getDoorState(serialNumber) {
@@ -279,7 +260,7 @@ class MyQ {
         delete newResult.state;
         return newResult;
       })
-      .catch(({ response }) => ErrorHandler.prototype.parseBadResponse(response));
+      .catch(({ response }) => ErrorHandler.parseBadResponse(response));
   }
 
   getLightState(serialNumber) {
@@ -294,41 +275,37 @@ class MyQ {
         delete newResult.state;
         return newResult;
       })
-      .catch(({ response }) => ErrorHandler.prototype.parseBadResponse(response));
+      .catch(({ response }) => ErrorHandler.parseBadResponse(response));
   }
 
   setDeviceState(serialNumber, action) {
-    let promise = Promise.resolve(() => null);
+    let promise = Promise.resolve();
     if (!this.accountId) {
-      promise = Promise.resolve(this.getAccountInfo());
+      promise = this.getAccountInfo();
     }
 
     return promise
       .then(() =>
         this.executeRequest(
-          `${constants.routes.setDevice
+          constants.routes.setDevice
             .replace('{accountId}', this.accountId)
-            .replace('{serialNumber}', serialNumber)}`,
+            .replace('{serialNumber}', serialNumber),
           'put',
           null,
           { action_type: action }
         )
       )
       .then(returnValue => {
-        const { returnCode, response } = returnValue;
+        const { returnCode } = returnValue;
         if (returnCode !== 0 && typeof returnCode !== 'undefined') {
           return returnValue;
         }
 
-        if ([200, 204].includes(response.status)) {
-          return {
-            returnCode: 0,
-          };
-        }
-
-        return ErrorHandler.prototype.parseBadResponse(response);
+        return {
+          returnCode: 0,
+        };
       })
-      .catch(({ response }) => ErrorHandler.prototype.parseBadResponse(response));
+      .catch(({ response }) => ErrorHandler.parseBadResponse(response));
   }
 
   setDoorOpen(serialNumber, shouldOpen) {
